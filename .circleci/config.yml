@@ -1,0 +1,97 @@
+version: 2.1
+
+# ── Orbs ──────────────────────────────────────────────────────────────────────
+orbs:
+  python: circleci/python@2.1.1
+
+# ── Reusable executors ────────────────────────────────────────────────────────
+executors:
+  python-executor:
+    docker:
+      - image: cimg/python:3.11
+    working_directory: ~/project
+
+# ── Jobs ──────────────────────────────────────────────────────────────────────
+jobs:
+
+  # 1. Install dependencies and cache them
+  install:
+    executor: python-executor
+    steps:
+      - checkout
+      - python/install-packages:
+          pkg-manager: pip
+          pip-dependency-file: requirements.txt
+      - persist_to_workspace:
+          root: ~/
+          paths:
+            - project
+            - .local  # pip user-install cache
+
+  # 2. Lint — style (black) + syntax (flake8)
+  lint:
+    executor: python-executor
+    steps:
+      - attach_workspace:
+          at: ~/
+      - run:
+          name: Check formatting with black
+          command: black --check src/ tests/
+      - run:
+          name: Lint with flake8
+          command: flake8 src/ tests/
+
+  # 3. Unit tests + coverage report
+  test:
+    executor: python-executor
+    steps:
+      - attach_workspace:
+          at: ~/
+      - run:
+          name: Run pytest with coverage
+          command: pytest
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: coverage.xml
+          destination: coverage-report
+
+  # 4. Build / package (wheel)
+  build:
+    executor: python-executor
+    steps:
+      - attach_workspace:
+          at: ~/
+      - run:
+          name: Install build tool
+          command: pip install --user build
+      - run:
+          name: Build wheel and sdist
+          command: python -m build
+      - store_artifacts:
+          path: dist/
+          destination: packages
+
+# ── Workflows ─────────────────────────────────────────────────────────────────
+workflows:
+  ci-pipeline:
+    jobs:
+      - install
+
+      - lint:
+          requires:
+            - install
+
+      - test:
+          requires:
+            - install
+
+      - build:
+          requires:
+            - lint
+            - test
+          filters:
+            branches:
+              only:
+                - main
+                - develop
